@@ -282,6 +282,9 @@ profile + relevant_memory + opportunity -> recommendation
 
 - `POST /profiles`
 - `GET /profiles`
+- `GET /profiles/{user_id}`
+- `PUT /profiles/{user_id}`
+- `DELETE /profiles/{user_id}`
 - `POST /articles/import`
 - `GET /articles`
 - `POST /pipeline/process`

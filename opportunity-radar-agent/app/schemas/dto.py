@@ -21,6 +21,10 @@ class UserProfileCreate(UserProfileBase):
     pass
 
 
+class UserProfileUpdate(UserProfileBase):
+    pass
+
+
 class UserProfileOut(UserProfileBase):
     id: int
     created_at: datetime

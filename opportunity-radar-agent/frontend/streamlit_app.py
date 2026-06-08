@@ -93,6 +93,26 @@ def api_post(path: str, payload: dict | None = None):
     return response.json()
 
 
+def api_put(path: str, payload: dict):
+    response = requests.put(f"{API_BASE}{path}", json=payload, timeout=60)
+    response.raise_for_status()
+    return response.json()
+
+
+def api_delete(path: str):
+    response = requests.delete(f"{API_BASE}{path}", timeout=20)
+    response.raise_for_status()
+    return response.json()
+
+
+def split_csv(text: str) -> list[str]:
+    return [item.strip() for item in text.split(",") if item.strip()]
+
+
+def join_csv(items: list[str]) -> str:
+    return ", ".join(items or [])
+
+
 def run_action(opportunity_id: int, user_id: int, action: str, extra_params: dict | None = None):
     return api_post(
         f"/opportunities/{opportunity_id}/actions",
@@ -134,30 +154,31 @@ with tab_profile:
     st.subheader("创建用户画像")
     col1, col2 = st.columns(2)
     with col1:
-        name = st.text_input("姓名", "演示用户")
-        major_direction = st.text_input("专业方向", "人工智能")
-        grade_identity = st.text_input("年级/身份", "大三本科生")
-        current_goals_text = st.text_input("当前目标关键词，用逗号分隔", "科研入门, 找实习, 保研")
+        name = st.text_input("姓名", "演示用户", key="create_name")
+        major_direction = st.text_input("专业方向", "人工智能", key="create_major_direction")
+        grade_identity = st.text_input("年级/身份", "大三本科生", key="create_grade_identity")
+        current_goals_text = st.text_input("当前目标关键词，用逗号分隔", "科研入门, 找实习, 保研", key="create_goals")
     with col2:
-        skills = st.text_input("技能栈，用逗号分隔", "Python, 机器学习, PyTorch, SQL")
-        interested_fields = st.text_input("感兴趣领域，用逗号分隔", "AI Agent, 多模态, 数据分析, RAG")
-        disliked_contents = st.text_input("不感兴趣内容，用逗号分隔", "纯营销, 无证书训练营")
-        time_preference = st.text_input("时间偏好", "暑期 周末 晚上")
-        location_preference = st.text_input("地点偏好", "线上 北京 上海 深圳")
+        skills = st.text_input("技能栈，用逗号分隔", "Python, 机器学习, PyTorch, SQL", key="create_skills")
+        interested_fields = st.text_input("感兴趣领域，用逗号分隔", "AI Agent, 多模态, 数据分析, RAG", key="create_interests")
+        disliked_contents = st.text_input("不感兴趣内容，用逗号分隔", "纯营销, 无证书训练营", key="create_dislikes")
+        time_preference = st.text_input("时间偏好", "暑期 周末 晚上", key="create_time_preference")
+        location_preference = st.text_input("地点偏好", "线上 北京 上海 深圳", key="create_location_preference")
     detailed_needs = st.text_area(
         "更具体的需求描述",
         "希望找到对保研和科研经历有帮助的 AI Agent / RAG 相关机会，最好能产出项目、论文复现或导师推荐信；实习方向偏数据分析和机器学习，地点优先线上、北京、上海、深圳。",
         height=110,
+        key="create_detailed_needs",
     )
     if st.button("保存画像"):
         payload = {
             "name": name,
             "major_direction": major_direction,
             "grade_identity": grade_identity,
-            "current_goals": [item.strip() for item in current_goals_text.split(",") if item.strip()],
-            "skills": [item.strip() for item in skills.split(",") if item.strip()],
-            "interested_fields": [item.strip() for item in interested_fields.split(",") if item.strip()],
-            "disliked_contents": [item.strip() for item in disliked_contents.split(",") if item.strip()],
+            "current_goals": split_csv(current_goals_text),
+            "skills": split_csv(skills),
+            "interested_fields": split_csv(interested_fields),
+            "disliked_contents": split_csv(disliked_contents),
             "detailed_needs": detailed_needs,
             "time_preference": time_preference,
             "location_preference": location_preference,
@@ -165,10 +186,73 @@ with tab_profile:
         created = api_post("/profiles", payload)
         st.success(f"画像已保存，用户 ID：{created['id']}")
 
-    st.subheader("已有画像")
+    st.subheader("管理已有画像")
     try:
         profiles = api_get("/profiles")
-        st.dataframe(profiles, use_container_width=True)
+        if not profiles:
+            st.info("还没有已创建的画像。")
+        else:
+            selected_profile = st.selectbox(
+                "选择要查看或修改的画像",
+                profiles,
+                format_func=lambda item: f"{item['id']} - {item['name']}（{item.get('grade_identity') or '未注明身份'}）",
+            )
+            st.dataframe(
+                [
+                    {
+                        "ID": item["id"],
+                        "姓名": item["name"],
+                        "专业方向": item["major_direction"],
+                        "身份": item["grade_identity"],
+                        "当前目标": join_csv(item["current_goals"]),
+                        "兴趣": join_csv(item["interested_fields"]),
+                        "更新时间": item["updated_at"],
+                    }
+                    for item in profiles
+                ],
+                use_container_width=True,
+            )
+            with st.form(f"profile-edit-{selected_profile['id']}"):
+                edit_col1, edit_col2 = st.columns(2)
+                with edit_col1:
+                    edit_name = st.text_input("姓名", selected_profile["name"])
+                    edit_major = st.text_input("专业方向", selected_profile["major_direction"])
+                    edit_grade = st.text_input("年级/身份", selected_profile["grade_identity"])
+                    edit_goals = st.text_input("当前目标关键词，用逗号分隔", join_csv(selected_profile["current_goals"]))
+                with edit_col2:
+                    edit_skills = st.text_input("技能栈，用逗号分隔", join_csv(selected_profile["skills"]))
+                    edit_interests = st.text_input("感兴趣领域，用逗号分隔", join_csv(selected_profile["interested_fields"]))
+                    edit_dislikes = st.text_input("不感兴趣内容，用逗号分隔", join_csv(selected_profile["disliked_contents"]))
+                    edit_time = st.text_input("时间偏好", selected_profile["time_preference"])
+                    edit_location = st.text_input("地点偏好", selected_profile["location_preference"])
+                edit_needs = st.text_area("更具体的需求描述", selected_profile["detailed_needs"], height=130)
+                if st.form_submit_button("保存修改"):
+                    updated = api_put(
+                        f"/profiles/{selected_profile['id']}",
+                        {
+                            "name": edit_name,
+                            "major_direction": edit_major,
+                            "grade_identity": edit_grade,
+                            "current_goals": split_csv(edit_goals),
+                            "skills": split_csv(edit_skills),
+                            "interested_fields": split_csv(edit_interests),
+                            "disliked_contents": split_csv(edit_dislikes),
+                            "detailed_needs": edit_needs,
+                            "time_preference": edit_time,
+                            "location_preference": edit_location,
+                        },
+                    )
+                    st.success(f"已更新画像：{updated['name']}")
+                    st.rerun()
+            st.warning("删除画像会同时删除该用户的推荐、状态、反馈事件、摘要和工具日志。")
+            confirm_delete = st.checkbox(
+                f"确认删除用户 {selected_profile['id']} - {selected_profile['name']}",
+                key=f"confirm-delete-profile-{selected_profile['id']}",
+            )
+            if st.button("删除该画像", disabled=not confirm_delete, type="secondary"):
+                api_delete(f"/profiles/{selected_profile['id']}")
+                st.success("画像已删除")
+                st.rerun()
     except Exception as exc:
         st.info(f"请先启动后端服务。{exc}")
 
@@ -198,7 +282,20 @@ with tab_opps:
 
 with tab_recs:
     st.subheader("生成推荐")
-    user_id = st.number_input("用户 ID", min_value=1, value=1, step=1)
+    try:
+        profile_options = api_get("/profiles")
+    except Exception:
+        profile_options = []
+    if profile_options:
+        selected_rec_profile = st.selectbox(
+            "选择用户画像",
+            profile_options,
+            format_func=lambda item: f"{item['id']} - {item['name']}（{item.get('grade_identity') or '未注明身份'}）",
+            key="recommend_profile_select",
+        )
+        user_id = int(selected_rec_profile["id"])
+    else:
+        user_id = st.number_input("用户 ID", min_value=1, value=1, step=1)
     if st.button("生成/刷新推荐"):
         api_post(f"/recommendations/generate/{user_id}")
         st.success("推荐已刷新")

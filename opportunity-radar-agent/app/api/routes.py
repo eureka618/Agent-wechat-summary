@@ -1,10 +1,23 @@
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
-from app.models.entities import Article, Opportunity, Recommendation, Summary, UserProfile
+
+from app.models.entities import (
+    Article,
+    MemoryReflection,
+    Opportunity,
+    OpportunityState,
+    Recommendation,
+    Summary,
+    ToolCall,
+    ToolCallLog,
+    UserEvent,
+    UserProfile,
+)
 from app.schemas.dto import (
     ArticleOut,
     ImportRequest,
@@ -17,6 +30,7 @@ from app.schemas.dto import (
     ToolCallRequest,
     UserProfileCreate,
     UserProfileOut,
+    UserProfileUpdate,
 )
 from app.services.extraction_service import ExtractionService
 from app.services.import_service import ImportService
@@ -56,6 +70,47 @@ def create_profile(payload: UserProfileCreate, db: Session = Depends(get_db)) ->
 @router.get("/profiles", response_model=list[UserProfileOut])
 def list_profiles(db: Session = Depends(get_db)) -> list[UserProfile]:
     return db.query(UserProfile).order_by(UserProfile.id.desc()).all()
+
+
+@router.get("/profiles/{user_id}", response_model=UserProfileOut)
+def get_profile(user_id: int, db: Session = Depends(get_db)) -> UserProfile:
+    profile = db.get(UserProfile, user_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="用户画像不存在")
+    return profile
+
+
+@router.put("/profiles/{user_id}", response_model=UserProfileOut)
+def update_profile(user_id: int, payload: UserProfileUpdate, db: Session = Depends(get_db)) -> UserProfile:
+    profile = db.get(UserProfile, user_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="用户画像不存在")
+    profile.name = payload.name
+    profile.major_direction = payload.major_direction
+    profile.grade_identity = payload.grade_identity
+    profile.current_goals = dumps(payload.current_goals)
+    profile.skills = dumps(payload.skills)
+    profile.interested_fields = dumps(payload.interested_fields)
+    profile.disliked_contents = dumps(payload.disliked_contents)
+    profile.detailed_needs = payload.detailed_needs
+    profile.time_preference = payload.time_preference
+    profile.location_preference = payload.location_preference
+    profile.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(profile)
+    return profile
+
+
+@router.delete("/profiles/{user_id}")
+def delete_profile(user_id: int, db: Session = Depends(get_db)) -> dict[str, int | str]:
+    profile = db.get(UserProfile, user_id)
+    if not profile:
+        raise HTTPException(status_code=404, detail="用户画像不存在")
+    for model in [Recommendation, OpportunityState, ToolCallLog, ToolCall, Summary, UserEvent, MemoryReflection]:
+        db.query(model).filter(model.user_id == user_id).delete(synchronize_session=False)
+    db.delete(profile)
+    db.commit()
+    return {"status": "deleted", "user_id": user_id}
 
 
 @router.post("/articles/import", response_model=ImportResult)
