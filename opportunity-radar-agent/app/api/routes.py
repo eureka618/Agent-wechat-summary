@@ -43,6 +43,7 @@ def create_profile(payload: UserProfileCreate, db: Session = Depends(get_db)) ->
         skills=dumps(payload.skills),
         interested_fields=dumps(payload.interested_fields),
         disliked_contents=dumps(payload.disliked_contents),
+        detailed_needs=payload.detailed_needs,
         time_preference=payload.time_preference,
         location_preference=payload.location_preference,
     )

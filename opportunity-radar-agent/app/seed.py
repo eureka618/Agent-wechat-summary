@@ -23,6 +23,7 @@ def main() -> None:
                 skills=dumps(["Python", "机器学习", "PyTorch", "SQL"]),
                 interested_fields=dumps(["AI Agent", "多模态", "数据分析", "RAG"]),
                 disliked_contents=dumps(["纯营销", "无证书训练营"]),
+                detailed_needs="希望找到对保研和科研经历有帮助的 AI Agent / RAG 相关机会，最好能产出项目、论文复现或导师推荐信；实习方向偏数据分析和机器学习，地点优先线上、北京、上海、深圳。",
                 time_preference="暑期 周末 晚上",
                 location_preference="线上 北京 上海 深圳",
             )

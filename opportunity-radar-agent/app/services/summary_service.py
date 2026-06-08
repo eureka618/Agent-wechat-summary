@@ -29,6 +29,7 @@ class SummaryService:
             "skills": loads_list(user.skills),
             "interested_fields": loads_list(user.interested_fields),
             "disliked_contents": loads_list(user.disliked_contents),
+            "detailed_needs": user.detailed_needs,
             "time_preference": user.time_preference,
             "location_preference": user.location_preference,
         }

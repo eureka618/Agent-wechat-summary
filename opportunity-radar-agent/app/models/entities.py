@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
@@ -17,6 +17,7 @@ class UserProfile(Base):
     skills: Mapped[str] = mapped_column(Text, default="[]")
     interested_fields: Mapped[str] = mapped_column(Text, default="[]")
     disliked_contents: Mapped[str] = mapped_column(Text, default="[]")
+    detailed_needs: Mapped[str] = mapped_column(Text, default="")
     time_preference: Mapped[str] = mapped_column(String(255), default="")
     location_preference: Mapped[str] = mapped_column(String(255), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -61,6 +62,16 @@ class Opportunity(Base):
     cost: Mapped[float] = mapped_column(Float, default=0.4)
     credibility: Mapped[float] = mapped_column(Float, default=0.7)
     raw_payload: Mapped[str] = mapped_column(Text, default="{}")
+    official_url: Mapped[str] = mapped_column(String(500), default="")
+    registration_url: Mapped[str] = mapped_column(String(500), default="")
+    verification_status: Mapped[str] = mapped_column(String(40), default="")
+    credibility_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    risk_level: Mapped[str] = mapped_column(String(40), default="")
+    risk_flags: Mapped[str] = mapped_column(Text, default="[]")
+    verification_summary: Mapped[str] = mapped_column(Text, default="")
+    evidence_sources: Mapped[str] = mapped_column(Text, default="[]")
+    enriched_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     article: Mapped[Article] = relationship(back_populates="opportunities")
@@ -80,11 +91,30 @@ class Recommendation(Base):
     credibility_score: Mapped[float] = mapped_column(Float, default=0)
     total_score: Mapped[float] = mapped_column(Float, default=0)
     reason: Mapped[str] = mapped_column(Text, default="")
+    content_overview: Mapped[str] = mapped_column(Text, default="")
+    relevance_explanation: Mapped[str] = mapped_column(Text, default="")
+    risk_notes: Mapped[str] = mapped_column(Text, default="[]")
+    anti_recommendation_reason: Mapped[str] = mapped_column(Text, default="")
     action_suggestion: Mapped[str] = mapped_column(Text, default="")
+    opportunity_state: Mapped[str] = mapped_column(String(40), default="recommended")
+    deadline: Mapped[str] = mapped_column(String(120), default="")
+    deadline_urgency: Mapped[str] = mapped_column(String(40), default="unknown")
+    deadline_note: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     user: Mapped[UserProfile] = relationship(back_populates="recommendations")
     opportunity: Mapped[Opportunity] = relationship(back_populates="recommendations")
+
+
+class OpportunityState(Base):
+    __tablename__ = "opportunity_states"
+    __table_args__ = (UniqueConstraint("user_id", "opportunity_id", name="uq_opportunity_state_user_opp"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("user_profiles.id"), index=True)
+    opportunity_id: Mapped[int] = mapped_column(ForeignKey("opportunities.id"), index=True)
+    state: Mapped[str] = mapped_column(String(40), default="new", index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class Summary(Base):
@@ -110,3 +140,40 @@ class ToolCall(Base):
     status: Mapped[str] = mapped_column(String(40), default="mocked")
     result: Mapped[str] = mapped_column(Text, default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class ToolCallLog(Base):
+    __tablename__ = "tool_call_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("user_profiles.id"), index=True)
+    opportunity_id: Mapped[int] = mapped_column(ForeignKey("opportunities.id"), index=True)
+    action: Mapped[str] = mapped_column(String(80), index=True)
+    tool_name: Mapped[str] = mapped_column(String(120), index=True)
+    input_json: Mapped[str] = mapped_column(Text, default="{}")
+    output_json: Mapped[str] = mapped_column(Text, default="{}")
+    status: Mapped[str] = mapped_column(String(40), default="success")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class UserEvent(Base):
+    __tablename__ = "user_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("user_profiles.id"), index=True)
+    event_type: Mapped[str] = mapped_column(String(80), index=True)
+    event_target: Mapped[str] = mapped_column(String(120), default="")
+    event_metadata: Mapped[str] = mapped_column(Text, default="{}")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class MemoryReflection(Base):
+    __tablename__ = "memory_reflections"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("user_profiles.id"), index=True)
+    reflection_type: Mapped[str] = mapped_column(String(120), index=True)
+    summary: Mapped[str] = mapped_column(Text)
+    confidence: Mapped[float] = mapped_column(Float, default=0.5)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
