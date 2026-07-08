@@ -3,7 +3,7 @@ from __future__ import annotations
 from pydantic import Field
 
 from app.services.agent_tools.base import BaseTool, OpportunityToolContext, ToolOutput
-from app.services.agent_tools.search_tool import MockSearchProvider, SearchProvider
+from app.services.agent_tools.search_tool import LocalSearchProvider, SearchProvider
 
 
 class EnrichOpportunityInput(OpportunityToolContext):
@@ -24,12 +24,12 @@ class EnrichOpportunityOutput(ToolOutput):
 
 class EnrichOpportunityTool(BaseTool):
     name = "enrich_opportunity"
-    description = "按需补全单条机会信息，MVP 基于已有字段和 mock 搜索。"
+    description = "按需补全单条机会信息，基于已有字段和本地规则检索。"
     input_model = EnrichOpportunityInput
     output_model = EnrichOpportunityOutput
 
     def __init__(self, search_provider: SearchProvider | None = None) -> None:
-        self.search_provider = search_provider or MockSearchProvider()
+        self.search_provider = search_provider or LocalSearchProvider()
 
     def run(self, tool_input: EnrichOpportunityInput) -> EnrichOpportunityOutput:
         self.search_provider.search(f"{tool_input.title} {tool_input.organizer}", max_results=3)

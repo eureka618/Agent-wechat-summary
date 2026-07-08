@@ -153,7 +153,6 @@
 - view_opportunity
 - save_opportunity
 - verify_opportunity
-- draft_email
 - create_todo
 - create_calendar
 - mark_useful
@@ -183,8 +182,8 @@
 - `matching_service`：根据用户画像打分、排序、生成行动建议。
 - `summary_service`：生成摘要，供定时任务或手动接口调用。
 - `scheduler`：APScheduler 定时触发摘要任务。
-- `tool_service`：搜索、日历、邮件、待办 mock。
-- `agent_tools`：Pydantic AI 风格轻量工具层，包含 `BaseTool`、`ToolRegistry`、mock search、核验、补全、日历、邮件、待办。
+- `tool_service`：搜索、日历、待办 mock。
+- `agent_tools`：Pydantic AI 风格轻量工具层，包含 `BaseTool`、`ToolRegistry`、mock search、核验、补全、日历、待办。
 - `opportunity_agent`：按用户 action 选择工具，执行后写入数据库。结构预留为 `OpportunityState -> ToolDecision -> ToolExecution -> ResultPersist -> UserFeedback`。
 - `growth_memory.memory_updater`：写入关键行为日志。
 - `growth_memory.reflection_generator`：基于最近 30 天或最近 100 条行为生成压缩 reflection。
@@ -230,14 +229,13 @@ total =
 
 ## 按需工具调用
 
-默认流水线只做文章导入、机会抽取、初步推荐和排序。核验、补全、日历、邮件、待办只在用户点击某条机会时触发。
+默认流水线只做文章导入、机会抽取、初步推荐和排序。核验、补全、日历、待办只在用户点击某条机会时触发。
 
 支持 action：
 
 - `verify`：核验真实性，更新 `verification_status`、`credibility_score`、`risk_level`、`risk_flags` 等字段。
 - `enrich`：补全官方链接、报名链接、deadline、地点、要求等字段，无法确认则返回 `unknown`。
 - `calendar`：创建 mock 日历提醒。
-- `email`：生成咨询/申请邮件草稿，不发送。
 - `todo`：生成行动待办清单。
 
 完整调用示例：
@@ -298,7 +296,6 @@ profile + relevant_memory + opportunity -> recommendation
 - `POST /opportunities/{opportunity_id}/actions/verify`
 - `POST /opportunities/{opportunity_id}/actions/enrich`
 - `POST /opportunities/{opportunity_id}/actions/calendar`
-- `POST /opportunities/{opportunity_id}/actions/email`
 - `POST /opportunities/{opportunity_id}/actions/todo`
 - `POST /memory/events`
 - `GET /memory/events/{user_id}`

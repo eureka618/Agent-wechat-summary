@@ -8,7 +8,7 @@ class TodoOutput(ToolOutput):
     suggested_deadline: str
 
 
-class MockTodoTool(BaseTool):
+class TodoTool(BaseTool):
     name = "create_todo"
     description = "为机会生成行动待办。"
     input_model = OpportunityToolContext
@@ -24,11 +24,9 @@ class MockTodoTool(BaseTool):
             items.append(f"检索「{tool_input.organizer}」背景，确认主办方可信度")
         if tool_input.requirements:
             items.append("逐条对照申请要求，标记缺失材料")
-        if tool_input.extra_params.get("include_email", True):
-            items.append("必要时发送咨询邮件，确认申请细节")
         return TodoOutput(
             status="success",
-            summary="已生成 mock 待办清单。",
+            summary="已生成待办清单。",
             todo_items=items,
             suggested_deadline=tool_input.deadline or "unknown",
         )

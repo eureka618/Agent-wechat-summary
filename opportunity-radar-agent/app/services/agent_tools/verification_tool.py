@@ -5,7 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from app.services.agent_tools.base import BaseTool, OpportunityToolContext, ToolOutput
-from app.services.agent_tools.search_tool import MockSearchProvider, SearchProvider, SearchResult
+from app.services.agent_tools.search_tool import LocalSearchProvider, SearchProvider, SearchResult
 
 
 class VerifyOpportunityInput(OpportunityToolContext):
@@ -23,12 +23,12 @@ class VerifyOpportunityOutput(ToolOutput):
 
 class VerifyOpportunityTool(BaseTool):
     name = "verify_opportunity"
-    description = "按需核验单条机会真实性，MVP 使用 mock 搜索和规则判断。"
+    description = "按需核验单条机会真实性，使用本地规则检索和规则判断。"
     input_model = VerifyOpportunityInput
     output_model = VerifyOpportunityOutput
 
     def __init__(self, search_provider: SearchProvider | None = None) -> None:
-        self.search_provider = search_provider or MockSearchProvider()
+        self.search_provider = search_provider or LocalSearchProvider()
 
     def run(self, tool_input: VerifyOpportunityInput) -> VerifyOpportunityOutput:
         text = " ".join(
@@ -62,15 +62,15 @@ class VerifyOpportunityTool(BaseTool):
         if score >= 78 and not risk_flags:
             status = "verified"
             risk_level = "low"
-            summary = "模拟核验显示该机会具备较完整的主办方和来源特征，暂未发现明显风险词。"
+            summary = "本地规则核验显示该机会具备较完整的主办方和来源特征，暂未发现明显风险词。"
         elif score < 45 or any("高风险" in flag or "承诺" in flag for flag in risk_flags):
             status = "suspicious"
             risk_level = "high"
-            summary = "模拟核验发现较多风险信号，建议人工确认官方来源后再行动。"
+            summary = "本地规则核验发现较多风险信号，建议人工确认官方来源后再行动。"
         else:
             status = "uncertain"
             risk_level = "medium" if risk_flags else "low"
-            summary = "模拟核验结果信息不足，无法确认真实性；建议补充官方链接或主办方页面。"
+            summary = "本地规则核验结果信息不足，无法确认真实性；建议补充官方链接或主办方页面。"
 
         return VerifyOpportunityOutput(
             status="success",

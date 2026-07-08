@@ -23,7 +23,6 @@ ACTION_STATE_MAP = {
     "verify": "verified",
     "todo": "todo_created",
     "calendar": "calendar_created",
-    "email": "email_drafted",
 }
 
 

@@ -6,7 +6,6 @@ from app.services.import_service import ImportService
 from app.services.json_utils import dumps
 from app.services.extraction_service import ExtractionService
 from app.services.matching_service import MatchingService
-from app.services.summary_service import SummaryService
 
 
 def main() -> None:
@@ -36,13 +35,10 @@ def main() -> None:
             ImportService().import_file(db, str(sample_path))
         ExtractionService().process_unprocessed_articles(db)
         recommendations = MatchingService().generate_for_user(db, profile.id)
-        summary = SummaryService().generate(db, profile.id, "daily")
 
         print("Seed 完成")
         print(f"用户 ID: {profile.id}")
         print(f"推荐数: {len(recommendations)}")
-        print("摘要预览:")
-        print(summary.content[:600])
     finally:
         db.close()
 

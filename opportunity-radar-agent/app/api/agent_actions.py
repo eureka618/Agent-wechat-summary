@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+import logging
 
 from app.core.database import get_db
 from app.schemas.dto import (
@@ -12,14 +13,19 @@ from app.services.opportunity_agent import OpportunityAgent
 from app.services.opportunity_state_service import OpportunityStateService
 
 router = APIRouter(prefix="/opportunities", tags=["opportunity-actions"])
+logger = logging.getLogger(__name__)
 
 
 @router.get("/{opportunity_id}/state", response_model=OpportunityStateOut)
 def get_opportunity_state(opportunity_id: int, user_id: int, db: Session = Depends(get_db)):
-    state = OpportunityStateService().get_state(db, user_id, opportunity_id)
-    db.commit()
-    db.refresh(state)
-    return state
+    try:
+        state = OpportunityStateService().get_state(db, user_id, opportunity_id)
+        db.commit()
+        db.refresh(state)
+        return state
+    except Exception as exc:
+        logger.exception("get opportunity state failed user_id=%s opportunity_id=%s", user_id, opportunity_id)
+        raise HTTPException(status_code=500, detail="机会状态读取失败") from exc
 
 
 @router.post("/{opportunity_id}/state", response_model=OpportunityStateOut)
@@ -35,6 +41,9 @@ def update_opportunity_state(
         return state
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("update opportunity state failed opportunity_id=%s", opportunity_id)
+        raise HTTPException(status_code=500, detail="机会状态更新失败") from exc
 
 
 @router.post("/{opportunity_id}/actions", response_model=OpportunityActionResponse)
@@ -55,6 +64,9 @@ def run_opportunity_action(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.exception("run opportunity action failed opportunity_id=%s action=%s", opportunity_id, payload.action)
+        raise HTTPException(status_code=500, detail="机会动作执行失败") from exc
 
 
 @router.post("/{opportunity_id}/actions/verify", response_model=OpportunityActionResponse)
@@ -72,12 +84,6 @@ def enrich_opportunity(opportunity_id: int, payload: OpportunityActionRequest, d
 @router.post("/{opportunity_id}/actions/calendar", response_model=OpportunityActionResponse)
 def create_calendar(opportunity_id: int, payload: OpportunityActionRequest, db: Session = Depends(get_db)):
     payload.action = "calendar"
-    return run_opportunity_action(opportunity_id, payload, db)
-
-
-@router.post("/{opportunity_id}/actions/email", response_model=OpportunityActionResponse)
-def draft_email(opportunity_id: int, payload: OpportunityActionRequest, db: Session = Depends(get_db)):
-    payload.action = "email"
     return run_opportunity_action(opportunity_id, payload, db)
 
 

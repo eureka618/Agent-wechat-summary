@@ -10,11 +10,14 @@ from app.services.json_utils import dumps
 
 ALLOWED_EVENT_TYPES = {
     "view_opportunity",
+    "view_source_article",
     "save_opportunity",
     "verify_opportunity",
-    "draft_email",
     "create_todo",
     "create_calendar",
+    "enrich_opportunity",
+    "search_similar_opportunities",
+    "assistant_feedback",
     "mark_useful",
     "mark_irrelevant",
     "mark_not_interested",

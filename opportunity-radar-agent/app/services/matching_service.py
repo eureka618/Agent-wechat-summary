@@ -1,9 +1,13 @@
 import re
 from datetime import datetime
 
+import logging
+
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.entities import Opportunity, Recommendation, UserEvent, UserProfile
+from app.services.feedback_service import FeedbackService
 from app.services.growth_memory.memory_manager import GrowthMemoryManager
 from app.services.json_utils import dumps, loads_dict, loads_list
 from app.services.llm_service import LLMService
@@ -17,6 +21,8 @@ GOAL_CATEGORY_WEIGHT = {
     "保研": {"夏令营": 1.0, "科研": 0.9, "竞赛": 0.75, "实验室招募": 0.65, "讲座": 0.4},
     "申请项目": {"夏令营": 0.85, "科研": 0.8, "课程": 0.7, "奖学金": 0.65},
 }
+
+logger = logging.getLogger(__name__)
 
 # Internal ranking weights. The UI intentionally hides numeric scores, so this
 # formula can evolve without making the demo feel like a spreadsheet to users.
@@ -32,31 +38,85 @@ class MatchingService:
     def __init__(self) -> None:
         self.llm = LLMService()
 
-    def generate_for_user(self, db: Session, user_id: int) -> list[Recommendation]:
-        user = db.get(UserProfile, user_id)
-        if not user:
-            raise ValueError("用户画像不存在")
-        db.query(Recommendation).filter(Recommendation.user_id == user_id).delete()
-        opportunities = db.query(Opportunity).all()
-        memory = GrowthMemoryManager()
-        state_service = OpportunityStateService()
-        recommendations = []
-        for opportunity in opportunities:
-            state = state_service.advance_state(db, user_id, opportunity.id, "recommended")
-            relevant_memory = [item.summary for item in memory.retrieve_relevant_memory(db, user_id, opportunity)]
-            negative_feedback_count = self._recent_negative_feedback_count(db, user_id, opportunity)
-            recommendations.append(self._score(user, opportunity, state.state, relevant_memory, negative_feedback_count))
-        recommendations.sort(key=lambda item: item.total_score, reverse=True)
-        for recommendation in recommendations:
-            db.add(recommendation)
-        db.commit()
-        return (
-            db.query(Recommendation)
-            .options(joinedload(Recommendation.opportunity))
-            .filter(Recommendation.user_id == user_id)
-            .order_by(Recommendation.total_score.desc())
-            .all()
-        )
+    def generate_for_user(self, db: Session, user_id: int, force: bool = True) -> list[Recommendation]:
+        try:
+            user = db.get(UserProfile, user_id)
+            if not user:
+                raise ValueError("用户画像不存在")
+            existing_query = (
+                db.query(Recommendation)
+                .join(Opportunity, Recommendation.opportunity_id == Opportunity.id)
+                .options(joinedload(Recommendation.opportunity))
+                .filter(Recommendation.user_id == user_id)
+                .order_by(Recommendation.total_score.desc())
+            )
+            if not force:
+                existing = existing_query.all()
+                if existing:
+                    return existing
+
+            opportunities = db.query(Opportunity).options(joinedload(Opportunity.article)).all()
+            if not opportunities:
+                logger.info("recommendations empty: no opportunities user_id=%s", user_id)
+                return existing_query.all()
+
+            memory = GrowthMemoryManager()
+            feedback = FeedbackService()
+            state_service = OpportunityStateService()
+            recommendations = []
+            for opportunity in opportunities:
+                try:
+                    state = state_service.get_state(db, user_id, opportunity.id)
+                    relevant_memory = [item.summary for item in memory.retrieve_relevant_memory(db, user_id, opportunity)]
+                    negative_feedback_count = self._recent_negative_feedback_count(db, user_id, opportunity)
+                    feedback_bias = feedback.get_user_feedback_bias(db, user_id, opportunity)
+                    db.rollback()
+                    recommendations.append(
+                        self._score(
+                            user,
+                            opportunity,
+                            state.state if state.state and state.state != "new" else "recommended",
+                            relevant_memory,
+                            negative_feedback_count,
+                            feedback_bias,
+                        )
+                    )
+                except Exception as exc:
+                    db.rollback()
+                    logger.exception(
+                        "recommendation opportunity skipped user_id=%s opportunity_id=%s error_type=%s",
+                        user_id,
+                        opportunity.id,
+                        type(exc).__name__,
+                    )
+            recommendations.sort(key=lambda item: item.total_score, reverse=True)
+            if not recommendations:
+                logger.warning("recommendations refresh produced no rows; keep previous user_id=%s", user_id)
+                return existing_query.all()
+            db.query(Recommendation).filter(Recommendation.user_id == user_id).delete(synchronize_session=False)
+            for recommendation in recommendations:
+                db.add(recommendation)
+                state_service.advance_state(db, user_id, recommendation.opportunity_id, "recommended")
+            db.commit()
+            return (
+                db.query(Recommendation)
+                .join(Opportunity, Recommendation.opportunity_id == Opportunity.id)
+                .options(joinedload(Recommendation.opportunity))
+                .filter(Recommendation.user_id == user_id)
+                .order_by(Recommendation.total_score.desc())
+                .all()
+            )
+        except ValueError:
+            db.rollback()
+            raise
+        except SQLAlchemyError:
+            db.rollback()
+            logger.exception("generate_for_user db failure user_id=%s", user_id)
+            raise
+        except Exception:
+            db.rollback()
+            logger.exception("generate_for_user failed user_id=%s", user_id)
+            raise
 
     def _score(
         self,
@@ -65,6 +125,7 @@ class MatchingService:
         opportunity_state: str,
         relevant_memory: list[str] | None = None,
         negative_feedback_count: int = 0,
+        feedback_bias: float = 0.0,
     ) -> Recommendation:
         relevant_memory = relevant_memory or []
         goals = loads_list(user.current_goals)
@@ -100,16 +161,30 @@ class MatchingService:
         credibility = self._credibility_score(opportunity)
         location_bonus = self._location_bonus(user.location_preference, opportunity.location)
         time_bonus = self._time_bonus(user.time_preference, opportunity.event_time)
-        analysis = self.llm.analyze_recommendation(
-            profile=self._profile_payload(user),
-            opportunity=self._opportunity_payload(opportunity),
-            base_scores={
+        base_scores = {
+            "relevance_score": relevance,
+            "benefit_score": benefit,
+            "urgency_score": urgency,
+            "cost_score": cost,
+        }
+        try:
+            analysis = self.llm.analyze_recommendation(
+                profile=self._profile_payload(user),
+                opportunity=self._opportunity_payload(opportunity),
+                base_scores=base_scores,
+            )
+        except Exception as exc:
+            logger.exception(
+                "recommendation llm fallback opportunity_id=%s error_type=%s",
+                opportunity.id,
+                type(exc).__name__,
+            )
+            analysis = {
                 "relevance_score": relevance,
                 "benefit_score": benefit,
-                "urgency_score": urgency,
-                "cost_score": cost,
-            },
-        )
+                "content_overview": self._fallback_overview(opportunity),
+                "relevance_explanation": self._reason(user, opportunity, relevance, urgency, relevant_memory, deadline_urgency),
+            }
         relevance = float(analysis.get("relevance_score", relevance))
         benefit = float(analysis.get("benefit_score", benefit))
 
@@ -126,6 +201,8 @@ class MatchingService:
             total += 4
         elif deadline_urgency == "expired":
             total -= 35
+        feedback_delta = feedback_bias * 30
+        total += feedback_delta
         total = min(100, max(0, total + location_bonus + time_bonus))
         risk_notes = self._risk_notes(
             user=user,
@@ -136,7 +213,14 @@ class MatchingService:
             time_bonus=time_bonus,
             deadline_urgency=deadline_urgency,
             negative_feedback_count=negative_feedback_count,
+            feedback_bias=feedback_bias,
         )
+        reason = analysis.get("relevance_explanation", "") or self._reason(
+            user, opportunity, relevance, urgency, relevant_memory, deadline_urgency
+        )
+        if feedback_bias:
+            direction = "加权" if feedback_bias > 0 else "降权"
+            reason = f"{reason}（已根据近期反馈对同类机会{direction} {abs(feedback_delta):.1f} 分。）"
 
         return Recommendation(
             user_id=user.id,
@@ -147,8 +231,7 @@ class MatchingService:
             cost_score=round(cost, 1),
             credibility_score=round(credibility, 1),
             total_score=round(total, 1),
-            reason=analysis.get("relevance_explanation", "")
-            or self._reason(user, opportunity, relevance, urgency, relevant_memory, deadline_urgency),
+            reason=reason,
             content_overview=str(analysis.get("content_overview", "")),
             relevance_explanation=str(analysis.get("relevance_explanation", "")),
             risk_notes=dumps(risk_notes),
@@ -297,6 +380,8 @@ class MatchingService:
         }
 
     def _opportunity_payload(self, opportunity: Opportunity) -> dict:
+        article = getattr(opportunity, "article", None)
+        article_content = getattr(article, "content", "") or ""
         return {
             "name": opportunity.name,
             "category": opportunity.category,
@@ -311,7 +396,16 @@ class MatchingService:
             "benefit": opportunity.benefit,
             "cost": opportunity.cost,
             "credibility": opportunity.credibility,
+            "article_title": getattr(article, "title", "") or "",
+            "article_content_excerpt": article_content[:3000],
         }
+
+    def _fallback_overview(self, opportunity: Opportunity) -> str:
+        text = " ".join(part for part in [opportunity.summary, opportunity.requirements, opportunity.target_audience] if part)
+        text = re.sub(r"\s+", " ", text).strip()
+        if not text:
+            text = f"{opportunity.name} 是一个{opportunity.category or '机会'}，建议先阅读原文确认要求、入口和截止时间。"
+        return text[:500]
 
     def _reason(
         self,
@@ -373,6 +467,7 @@ class MatchingService:
         time_bonus: float,
         deadline_urgency: str,
         negative_feedback_count: int,
+        feedback_bias: float,
     ) -> list[str]:
         risks = []
         if deadline_urgency == "unknown":
@@ -396,6 +491,10 @@ class MatchingService:
             risks.append("文章内容偏宣传，缺少报名方式或明确行动入口")
         if negative_feedback_count >= 2:
             risks.append("与用户近期负反馈方向相似")
+        if feedback_bias < 0:
+            risks.append("已根据近期反馈降低同类机会权重")
+        elif feedback_bias > 0:
+            risks.append("已根据近期正反馈提高同类机会权重")
         if not risks:
             return ["暂无明显风险，但建议核验原文链接和截止时间。"]
         return risks

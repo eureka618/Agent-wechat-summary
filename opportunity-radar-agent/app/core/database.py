@@ -1,6 +1,6 @@
 from collections.abc import Generator
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.core.config import get_settings
@@ -11,9 +11,18 @@ class Base(DeclarativeBase):
 
 
 settings = get_settings()
-connect_args = {"check_same_thread": False} if settings.database_url.startswith("sqlite") else {}
+connect_args = {"check_same_thread": False, "timeout": 30} if settings.database_url.startswith("sqlite") else {}
 engine = create_engine(settings.database_url, connect_args=connect_args)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+
+if settings.database_url.startswith("sqlite"):
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragmas(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA busy_timeout=30000")
+        cursor.close()
 
 
 def get_db() -> Generator[Session, None, None]:
@@ -78,3 +87,34 @@ def _ensure_sqlite_columns() -> None:
         for column_name, column_type in recommendation_columns.items():
             if column_name not in existing_rec:
                 connection.execute(text(f"ALTER TABLE recommendations ADD COLUMN {column_name} {column_type}"))
+    _ensure_columns(
+        table_names,
+        "tool_calls",
+        {
+            "query": "TEXT DEFAULT ''",
+            "provider": "VARCHAR(120) DEFAULT ''",
+            "result_summary": "TEXT DEFAULT ''",
+            "error_message": "TEXT DEFAULT ''",
+        },
+    )
+    _ensure_columns(
+        table_names,
+        "tool_call_logs",
+        {
+            "query": "TEXT DEFAULT ''",
+            "provider": "VARCHAR(120) DEFAULT ''",
+            "result_summary": "TEXT DEFAULT ''",
+            "error_message": "TEXT DEFAULT ''",
+        },
+    )
+
+
+def _ensure_columns(table_names: list[str], table_name: str, columns: dict[str, str]) -> None:
+    if table_name not in table_names:
+        return
+    inspector = inspect(engine)
+    existing = {column["name"] for column in inspector.get_columns(table_name)}
+    with engine.begin() as connection:
+        for column_name, column_type in columns.items():
+            if column_name not in existing:
+                connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}"))

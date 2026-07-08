@@ -11,8 +11,8 @@
 5. 个性化推荐：用相关性、紧急程度、成长收益和准备轻重做内部排序；配置 DeepSeek/OpenAI 时，会生成内容概括、相关性分析并校正部分排序信号，前端不暴露具体分数。
 6. 定时摘要：APScheduler 每天/每周触发推荐生成。
 7. 行动建议：为高价值机会生成下一步建议。
-8. 工具预留：搜索、日历、邮件草稿、待办事项接口目前为 mock。
-9. 按需工具调用：用户点击“核验真实性 / 深挖详情 / 加入日历 / 生成邮件 / 生成待办”时，才围绕单条机会触发工具。
+8. 工具预留：搜索、日历、待办事项接口目前为 mock。
+9. 按需工具调用：用户点击核验、检索补全、加入日历或生成待办时，才围绕单条机会触发工具。
 10. Growth Memory：记录关键行为，生成压缩 Reflection，推荐时只检索相关记忆。
 
 ## 项目结构
@@ -25,7 +25,7 @@ opportunity-radar-agent/
     models/           SQLAlchemy 表模型
     schemas/          Pydantic DTO
     services/         导入、抽取、匹配、摘要、按需 Agent 工具
-      agent_tools/    BaseTool、ToolRegistry、verify/enrich/calendar/email/todo
+      agent_tools/    BaseTool、ToolRegistry、verify/enrich/calendar/todo
       growth_memory/  行为事件、Reflection 生成、按需记忆检索
     main.py           FastAPI 入口
   frontend/

@@ -1,0 +1,184 @@
+# CODEX HANDOFF
+
+## Current Project
+
+- Root: `D:\熵减特工agent中期\src\opportunity-radar-agent`
+- Frontend: `frontend/streamlit_app.py`
+- Backend routes: `app/api/routes.py`
+- Database models: `app/models/entities.py`
+- LLM entry point: `app/services/llm_gateway.py`
+
+## Recent Completed Work
+
+- Stability fixes for recommendation refresh and AI progress:
+  - Frontend request helpers now distinguish connection failure, timeout, and backend business errors.
+  - The message `无法连接后端服务，请确认 FastAPI 已启动。` is shown only when a connection error happens and `/health` is also unreachable.
+  - Recommendation refresh no longer deletes old recommendations before model work succeeds.
+  - Recommendation refresh skips/falls back for a single opportunity failure instead of failing the whole refresh.
+  - Recommendation refresh button is disabled while a refresh is in progress.
+  - SQLite now uses `busy_timeout=30000` and WAL mode.
+  - `LLMGateway` retries transient network/429/502/503/504 errors up to 2 times and does not retry 400/401/403.
+  - Structured JSON parsing allows one model-assisted JSON repair pass.
+  - AI progress `/analyze` now starts an `OpportunityProgressTask` quickly and runs multi-round analysis in a FastAPI background task.
+  - The background execution now uses daemon `threading.Thread`, not Starlette `BackgroundTasks`, because Starlette background work still blocked the single-process demo server during long LLM calls.
+  - AI progress max rounds is 3 to reduce transient model failure probability.
+  - If final summary LLM call fails after at least one successful stage round, the task now stores a conservative partial final result instead of failing the whole task.
+  - Task status can be polled with `GET /tools/opportunity-progress/tasks/{task_id}` and restored with `GET /tools/opportunity-progress/{user_id}/{opportunity_id}/task`.
+  - Duplicate AI progress clicks reuse the current analyzing/waiting/stopped task instead of creating many tasks.
+  - Background AI progress uses its own DB session and commits round progress incrementally.
+  - Structured logs now include request/task IDs, user/opportunity IDs, elapsed time, round count, and exception type without prompts or API keys.
+  - AI progress now has an optional `联网核实最新信息` action:
+    - Reuses existing `BochaSearchProvider` only.
+    - New table: `opportunity_progress_web_checks`.
+    - Task endpoint: `POST /tools/opportunity-progress/tasks/{task_id}/web-check`.
+    - Plan endpoint: `POST /tools/opportunity-progress/plans/{plan_id}/web-check`.
+    - Poll endpoint: `GET /tools/opportunity-progress/web-checks/{check_id}`.
+    - Latest endpoints: `GET /tools/opportunity-progress/tasks/{task_id}/web-check`, `GET /tools/opportunity-progress/plans/{plan_id}/web-check`.
+    - Uses daemon threads and independent DB sessions.
+    - Search failure never fails the original progress task/plan; it records status `failed` and keeps local analysis.
+    - Search results are stored as sources for the web-check only and never update the Opportunity table.
+
+- Weixin MCP is integrated in HTTP mode through the provider layer. Diagnostics can confirm MCP reachability and tool availability.
+- Weixin search now has cache, cooldown, and graceful degradation. Do not keep hitting Sogou Weixin when raw MCP results are empty.
+- Opportunity assistant replaced the old "deep enrichment" and "similar search" frontend entry points.
+- `POST /tools/opportunity-assistant/chat` answers through `LLMGateway` and can optionally use Bocha search.
+- Calendar backend is implemented. `GET /calendar/{user_id}` returns grouped reminders for the calendar page.
+- Calendar frontend tab is named `日历` and displays `近期提醒`, `更晚提醒`, `截止时间待确认`, and `已过期提醒`.
+- Calendar product logic was tightened:
+  - Only opportunities with a known explicit date create or display `CalendarEvent`.
+  - No fallback `today/tomorrow 09:00` calendar events are created.
+  - Existing suspicious fallback events are hidden from `/calendar/{user_id}` unless the event date matches a re-extracted explicit opportunity date.
+  - Opportunities with Todo but no explicit date appear only in the bottom `已加入待办，日期待确认` area.
+  - Formal calendar reminders are grouped by date in the frontend and show only time, reminder type, short title, and `.ics` download.
+- Recommendation card buttons now use:
+  - Recommendation sorting page: only `查看原文`.
+  - Source article detail page: `问问机会助理`, `待办加入日历`, `有用`, `不感兴趣`, `已申请`.
+- The old `核验真实性` frontend button was removed.
+- The old separate `加入日历` and `生成待办` buttons were merged into `待办加入日历`.
+- `待办加入日历` first creates or reuses the Todo, then calls the existing opportunity `calendar` action so the calendar page can show the reminder.
+- Recommendation feedback records `user_events` only. It no longer generates memory immediately after each feedback action.
+- Growth memory is now a manual snapshot flow:
+  - `POST /memory/{user_id}/generate` reads the current profile, recent behavior window, related opportunities, and the latest 3 growth memory snapshots.
+  - `GET /memory/{user_id}/latest` returns only the latest snapshot.
+  - Snapshots are saved in `growth_memory_snapshots`; old `memory_reflections` data is retained only for compatibility and is not shown in the frontend.
+  - The frontend displays exactly five sections: `当前阶段`, `近期关注重点`, `判断标准与偏好变化`, `整体观察`, `下一阶段建议`.
+- Opportunity Assistant uses the latest growth memory snapshot as context when available.
+- The old summary feedback module was removed from navigation, frontend, backend routes, service layer, scheduler startup, seed script, and requirements.
+- Recommendation sorting page was simplified into lightweight cards:
+  - Cards show opportunity name, state, time, overview, relevance/reason, and `查看原文`.
+  - Detailed actions were moved to a Streamlit session-state page `source_article_detail`.
+  - `返回推荐排序` sets `current_page = "recommendations"` and renders the lightweight recommendation page directly; `返回主导航` clears that state.
+  - `render_opportunity_actions(...)` is the shared action renderer used by the detail page.
+  - `GET /opportunities/{opportunity_id}/source-article` returns Article content or a summary fallback without 500ing on missing article text.
+  - Detail page shows source metadata, a scrollable original text area, and then the full action buttons.
+- 机会沟通草稿生成功能已从产品入口、动作路由、工具注册和文档中移除。历史行为记录未删除。
+- Added lightweight `AI 推进当前机会` on the source article detail action area:
+  - Frontend button: `让 AI 帮我推进`.
+  - Backend analyze endpoint: `POST /tools/opportunity-progress/{user_id}/{opportunity_id}/analyze`.
+  - Service: `app/services/opportunity_progress_service.py`.
+  - Task table: `opportunity_progress_tasks`.
+  - The loop calls `LLMGateway` for strict JSON stage summaries, up to 5 rounds, then one final JSON result.
+  - Context is limited to current opportunity, user profile, latest growth memory snapshot, source article excerpt, and up to 5 local similar opportunities.
+  - It does not call Weixin search, Bocha search, calendar, email, verification, or any Agent tool registry.
+  - It now supports long-running progress plans instead of only one-time Todo confirmation.
+  - Initial analysis can be converted into a formal progress plan through `POST /tools/opportunity-progress/{task_id}/create-plan`.
+  - Current plan lookup: `GET /tools/opportunity-progress/{user_id}/{opportunity_id}/plan`.
+  - Plan detail: `GET /tools/opportunity-progress/plans/{plan_id}`.
+  - User progress replan: `POST /tools/opportunity-progress/plans/{plan_id}/replan`.
+  - Confirm/dismiss proposed update: `POST /tools/opportunity-progress/plans/{plan_id}/confirm-update`, `POST /tools/opportunity-progress/plans/{plan_id}/dismiss-update`.
+  - Sync selected plan items to Todo: `POST /tools/opportunity-progress/plans/{plan_id}/sync-todos`.
+  - User-controlled lifecycle: `complete`, `pause`, `close`.
+  - New tables: `opportunity_progress_plans`, `opportunity_progress_items`, `opportunity_progress_updates`, `opportunity_progress_versions`.
+  - AI replan output is only a pending proposal; the official plan changes only after user confirmation.
+  - Plan versions save user-facing snapshots and structured changes, not model chain-of-thought.
+
+## Constraints To Preserve
+
+- Do not bypass Weixin/Sogou anti-scrape controls.
+- Do not add proxy pools, captcha handling, cookie pools, forged login state, infinite retries, or higher concurrency.
+- Do not mock fake search results.
+- Do not restore `不相关`, `太简单`, or `太难` buttons.
+- Do not rewrite or bypass `LLMGateway`.
+- Do not add a vector database or LangMem dependency for growth memory.
+- Do not save full chat history or raw long feedback as semantic memory.
+- Do not regenerate growth memory automatically from each feedback event.
+- Do not restore the summary feedback module or scheduled summary generation.
+- Do not put opportunities without explicit dates into formal calendar reminder sections.
+- Do not recreate default 09:00 reminders for ambiguous dates such as `近期`, `报名中`, or `5月中旬-5月末` without a year.
+- Do not add Calendar or LangGraph agent features beyond the current implemented scope unless explicitly requested.
+- 不要恢复机会沟通草稿生成功能，除非用户明确要求。
+- Do not add fake tools to `AI 推进当前机会`; it is only LLMGateway multi-round analysis plus confirmed Todo creation.
+- Do not make `AI 推进当前机会` call search, calendar, email, verification, or batch/multi-opportunity automation.
+- Do not let AI directly overwrite, delete, complete, pause, or close a progress plan. User confirmation is required.
+- Progress plan tasks are internal by default. Todo sync must be user-selected.
+- Do not put the full action button row back into recommendation sorting cards; keep those actions on the source article detail page.
+- Do not expand source articles inline inside recommendation cards.
+- External similar opportunities must not be automatically inserted into the main Opportunity table.
+- Keep existing Todo, `已申请`, `有用`, and `不感兴趣` behavior intact.
+
+## Verification Pointers
+
+- Frontend syntax check:
+  - `.\.venv\Scripts\python.exe -m py_compile frontend\streamlit_app.py`
+- Growth memory syntax check:
+  - `.\.venv\Scripts\python.exe -m py_compile app\services\feedback_service.py app\services\growth_memory\snapshot_service.py app\services\growth_memory\memory_updater.py app\services\growth_memory\memory_retriever.py app\services\growth_memory\memory_manager.py app\services\growth_memory\memory_codec.py app\services\opportunity_assistant_service.py app\schemas\dto.py`
+- Main UI area to inspect:
+  - Recommendation cards in `frontend/streamlit_app.py`
+  - Calendar tab in `frontend/streamlit_app.py`
+  - Source article detail page in `frontend/streamlit_app.py`
+- Calendar data endpoint used by frontend:
+  - `GET /calendar/{user_id}`
+- Source article endpoint used by frontend:
+  - `GET /opportunities/{opportunity_id}/source-article`
+- Merged button backend calls:
+  - `POST /todos/from-opportunity/{user_id}/{opportunity_id}`
+  - `POST /opportunities/{opportunity_id}/actions` with action `calendar`
+- AI progress backend calls:
+  - `POST /tools/opportunity-progress/{user_id}/{opportunity_id}/analyze`
+  - `POST /tools/opportunity-progress/{task_id}/create-plan`
+  - `GET /tools/opportunity-progress/{user_id}/{opportunity_id}/plan`
+  - `POST /tools/opportunity-progress/plans/{plan_id}/replan`
+  - `POST /tools/opportunity-progress/plans/{plan_id}/confirm-update`
+  - `POST /tools/opportunity-progress/plans/{plan_id}/dismiss-update`
+  - `POST /tools/opportunity-progress/plans/{plan_id}/sync-todos`
+  - `POST /tools/opportunity-progress/plans/{plan_id}/complete|pause|close`
+- Calendar verification used:
+  - `.\.venv\Scripts\python.exe -m py_compile app\services\calendar_event_service.py app\services\agent_tools\calendar_tool.py app\services\opportunity_agent.py app\services\todo_service.py app\api\routes.py app\schemas\dto.py frontend\streamlit_app.py`
+  - `GET /calendar/9` returned formal reminder count `0` and uncertain Todo count `4` after filtering ambiguous/no-date opportunities.
+- AI progress verification used:
+  - `.\.venv\Scripts\python.exe -m py_compile app\services\opportunity_progress_service.py app\api\routes.py app\schemas\dto.py app\models\entities.py frontend\streamlit_app.py`
+  - TestClient confirmed `/health` and both opportunity-progress OpenAPI paths.
+  - A temporary in-memory SQLite service test with a fake gateway confirmed: analysis creates 0 Todos, confirm creates 1 Todo, repeated confirm does not duplicate.
+  - Long-running plan verification used a temporary in-memory SQLite service test with fake gateway:
+    - create plan from initial task;
+    - duplicate create returns the same current plan;
+    - replan creates a pending update and does not mutate the formal plan;
+    - confirm update increments version and adds/updates items;
+    - selected item Todo sync creates at most one current Todo under the existing Todo schema and reports existing matches;
+    - user complete updates system status.
+  - OpenAPI route check confirmed all progress-plan endpoints are registered.
+  - `init_db()` confirmed the four new progress-plan tables are created.
+  - Stability verification:
+    - Recommendation refresh with fake LLM passed 20/20 runs.
+    - AI progress analyze route with background execution monkeypatched passed 20/20 runs.
+    - Fast repeated AI progress clicks returned one task ID across 5 clicks.
+    - JSON repair simulation succeeded.
+    - Error-message classification simulation covered model JSON, database busy, and LLM unavailable.
+    - LLM transient retry simulation retried twice and succeeded on the third call; bad request simulation did not retry.
+    - Live uvicorn check: `POST /recommendations/generate/9?force=true` returned existing recommendations quickly.
+    - Live uvicorn check: `POST /tools/opportunity-progress/3/5/analyze` returned task id quickly; later `GET /tasks/21` returned `stopped/final_summary` with 3 rounds.
+    - Live uvicorn check: `POST /tools/opportunity-progress/9/7/analyze` returned task id quickly while `/health` also returned immediately; task 22 stored partial final result instead of failing when the final LLM call was unavailable.
+    - Web-check verification with mocked Bocha and mocked LLM:
+      - task web-check returned quickly as `searching`;
+      - polling later returned `completed` with one source and analysis;
+      - mocked Bocha failure returned `failed` with local-analysis fallback message;
+      - compile and OpenAPI route checks passed.
+
+## Notes For Next Session
+
+- If the merged button reports Todo success but no calendar reminder appears, first check whether the opportunity has an explicit date. No explicit date means expected status is `calendar_skipped_no_date`.
+- Opportunities without a clear date should appear under `已加入待办，日期待确认`; they should not appear in formal calendar sections.
+- If Weixin search returns empty raw MCP results, treat it as a temporary search-source limitation and avoid repeated live requests.
+- Feedback with empty text was verified through `POST /feedback/recommendation/{user_id}/{recommendation_id}` and returned `200`.
+- Feedback with text is saved into `user_events.event_metadata.feedback_text`, but does not call the model until the user manually refreshes growth memory.
+- Source article endpoint was checked with `GET /opportunities/7/source-article` and returned `200` with content.
