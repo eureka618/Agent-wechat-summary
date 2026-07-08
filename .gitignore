@@ -1,4 +1,4 @@
-﻿# Secrets
+﻿# Secrets and environment variables
 .env
 .env.*
 !.env.example
@@ -16,7 +16,7 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 
-# IDE
+# IDE configuration
 .vscode/
 .idea/
 
@@ -29,14 +29,14 @@ logs/
 *.sqlite
 *.sqlite3
 
-# OS files
-.DS_Store
-Thumbs.db
-
-# Office temporary files
-~$*
-
-# Build files
+# Build output
 build/
 dist/
 *.egg-info/
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# Microsoft Office temporary files
+~$*

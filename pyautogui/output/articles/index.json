@@ -1,0 +1,25 @@
+{
+  "articles": [
+    {
+      "article_number": 1,
+      "title": "让AI Agent学会“及时停手”：华盛顿大学团队提出上下文工程方法CONVOLVE",
+      "hash": "7fb3fb54cd6e259d3a0a8e48fce87cca7e002364d54a6e8a83e8ffe5243432b6",
+      "duplicate": false,
+      "saved": true,
+      "raw_text_path": "output\\articles\\article_1_raw.txt",
+      "clean_text_path": "output\\articles\\article_1_clean.txt",
+      "meta_path": "output\\articles\\article_1_meta.json",
+      "raw_chars": 4239,
+      "clean_chars": 3880,
+      "created_at": "2026-07-06T00:08:43"
+    }
+  ],
+  "hashes": {
+    "7fb3fb54cd6e259d3a0a8e48fce87cca7e002364d54a6e8a83e8ffe5243432b6": {
+      "article_number": 1,
+      "title": "让AI Agent学会“及时停手”：华盛顿大学团队提出上下文工程方法CONVOLVE",
+      "clean_text_path": "output\\articles\\article_1_clean.txt",
+      "created_at": "2026-07-06T00:08:43"
+    }
+  }
+}
